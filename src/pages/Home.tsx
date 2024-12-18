@@ -1,29 +1,86 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { PlaylistSelector } from '../components/PlaylistSelector';
 import { GamePlayer } from '../components/GamePlayer';
 import { Header } from '../components/Header';
 import { SpotifyPlaylist, SpotifyTrack, SpotifyUser } from '../types/spotify';
+import { getUserPlaylists, getPlaylistTracks } from '../services/spotifyApi';
 
 interface HomeProps {
-  user: SpotifyUser | null;
-  playlists: SpotifyPlaylist[];
-  currentTrack: SpotifyTrack | null;
-  error: string | null;
-  onPlaylistSelect: (playlist: SpotifyPlaylist) => void;
-  onPlayAgain: () => void;
-  onResetPlaylist: () => void;
   challengeData?: any;
 }
 
-export const Home: React.FC<HomeProps> = ({
-  user,
-  playlists,
-  currentTrack,
-  error,
-  onPlaylistSelect,
-  onPlayAgain,
-  challengeData
-}) => {
+export const Home: React.FC<HomeProps> = ({ challengeData }) => {
+  const [user, setUser] = useState<SpotifyUser | null>(null);
+  const [playlists, setPlaylists] = useState<SpotifyPlaylist[]>([]);
+  const [currentTrack, setCurrentTrack] = useState<SpotifyTrack | null>(null);
+  const [currentPlaylist, setCurrentPlaylist] = useState<SpotifyPlaylist | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [playedTracks, setPlayedTracks] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!challengeData) {
+      getUserPlaylists()
+        .then(data => {
+          setPlaylists(data.items);
+        })
+        .catch(error => {
+          console.error('Failed to fetch playlists:', error);
+          setError('Failed to load playlists. Please try again.');
+        });
+    }
+  }, [challengeData]);
+
+  const handlePlaylistSelect = async (playlist: SpotifyPlaylist) => {
+    try {
+      setCurrentPlaylist(playlist);
+      
+      if (challengeData) {
+        // Handle challenge mode
+        const currentIndex = playedTracks.size;
+        if (currentIndex >= challengeData.length) {
+          setError('Challenge complete!');
+          return;
+        }
+        
+        setCurrentTrack(challengeData[currentIndex]);
+        setPlayedTracks(prev => new Set([...prev, challengeData[currentIndex].trackId]));
+      } else {
+        // Handle standard mode
+        const response = await getPlaylistTracks(playlist.id);
+        const validTracks = response.items
+          .map(item => item.track)
+          .filter(track => !playedTracks.has(track.id));
+
+        if (validTracks.length === 0) {
+          setError('No more unplayed tracks in this playlist!');
+          return;
+        }
+
+        const randomTrack = validTracks[Math.floor(Math.random() * validTracks.length)];
+        setCurrentTrack(randomTrack);
+        setPlayedTracks(prev => new Set([...prev, randomTrack.id]));
+      }
+      
+      setError(null);
+    } catch (error) {
+      console.error('Failed to get tracks:', error);
+      setError('Failed to load tracks. Please try again.');
+    }
+  };
+
+  const handlePlayAgain = async () => {
+    if (currentPlaylist) {
+      await handlePlaylistSelect(currentPlaylist);
+    }
+  };
+
+  const handleResetPlaylist = () => {
+    setCurrentPlaylist(null);
+    setCurrentTrack(null);
+    setPlayedTracks(new Set());
+    setError(null);
+  };
+
   return (
     <div className="min-h-screen bg-gray-100 dark:bg-gray-900">
       <Header />
@@ -35,17 +92,21 @@ export const Home: React.FC<HomeProps> = ({
               {challengeData ? 'Challenge Mode' : 'Your Playlists'}
             </h2>
             {error && (
-              <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
+              <div className="mb-6 p-4 bg-red-50 dark:bg-red-900 border border-red-200 dark:border-red-700 rounded-lg text-red-700 dark:text-red-200">
                 {error}
               </div>
             )}
-            <PlaylistSelector playlists={playlists} onSelect={onPlaylistSelect} />
+            <PlaylistSelector 
+              playlists={playlists} 
+              onSelect={handlePlaylistSelect}
+              challengeData={challengeData}
+            />
           </div>
         ) : (
           <GamePlayer 
             track={currentTrack} 
-            onGameComplete={onPlayAgain}
-            onPlayAgain={onPlayAgain}
+            onGameComplete={handlePlayAgain}
+            onPlayAgain={handlePlayAgain}
             challengeData={challengeData}
           />
         )}
